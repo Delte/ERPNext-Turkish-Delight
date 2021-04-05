@@ -4,7 +4,7 @@
 from __future__ import unicode_literals
 import frappe
 from frappe import _
-from erpnextturkish.eirsaliye.api.utlis import to_base64, get_hash_md5, render_template
+from erpnextturkish.eirsaliye.api.utils import to_base64, get_hash_md5, render_template
 from frappe.contacts.doctype.address.address import get_default_address
 from frappe.utils import format_datetime
 import requests
@@ -14,8 +14,23 @@ from frappe.desk.form.utils import add_comment
 from erpnextturkish import console
 
 
+
+def on_submit_validate(doc, method):
+    field_list = ["set_warehouse", "driver_name", "vehicle_no", "transporter_name"]
+    translation_dict = {'set_warehouse': 'Ürün Çıkış Deposu', 'driver_name': 'Sürücü Adı', 'vehicle_no': 'Araç Plakası', 'transporter_name': 'Taşıyıcı'}
+    for field in field_list:
+        if not doc.get(field):
+            frappe.throw(_("'{0}' alanı boş geçilemez!").format(translation_dict[field])) #frappe.throw(_("Field: '{0}' can not be emtpy in DocType: {1} {2}").format(field, doc.doctype, doc.name))
+
+
 @frappe.whitelist()
 def send_eirsaliye(delivery_note_name):
+    import urllib3
+
+    strResult = ""
+
+    urllib3.disable_warnings()#Remove TLS warning
+
     doc = frappe.get_doc("Delivery Note", delivery_note_name)
 
     if not doc.eirsaliye_uuid:
@@ -31,10 +46,15 @@ def send_eirsaliye(delivery_note_name):
     #Validate the DN fields.
     validate_delivery_note(doc)
 
+    if doc.belgeno:#If belgeno field is not empty
+        dctResponse = validate_eirsaliye(doc.name)
+        if dctResponse.get('durum') != 2:#If durum is not xml error return it back so we should send the DN only if we hasn't sent it or if we had an XML error before.
+            return
+
     eirsaliye_settings = frappe.get_all("E Irsaliye Ayarlar", filters = {"company": doc.company})[0]
     settings_doc = frappe.get_doc("E Irsaliye Ayarlar", eirsaliye_settings)
     validate_settings_doc(settings_doc)
-    
+
     set_warehouse_address_doc = frappe.get_doc("Address", get_default_address("Warehouse", doc.set_warehouse))
     set_warehouse_address_doc = set_missing_address_values(set_warehouse_address_doc)
     validate_address(set_warehouse_address_doc)
@@ -60,7 +80,7 @@ def send_eirsaliye(delivery_note_name):
             fields = ["td_eirsaliye_birimi"]
         )
         if len(eirsaliye_birimi_list) == 0:
-            frappe.throw(_("There is no equivalent to the unit of measure: {0} in E Irsaliye Ayarlar: {1}").format(item.uom, eirsaliye_settings))
+            frappe.throw(_("Please set {0} uom in e-Receipt settings for company {1}.").format(item.uom, eirsaliye_settings))
         td_eirsaliye_birimi = eirsaliye_birimi_list[0]["td_eirsaliye_birimi"]
         item.td_eirsaliye_birimi = td_eirsaliye_birimi
 
@@ -93,6 +113,9 @@ def send_eirsaliye(delivery_note_name):
     session.headers.update({"Content-Length": str(len(body))})
     response = session.post(url=endpoint, data=body, verify=False)
     xml = response.content
+    #frappe.msgprint(xml)
+    #print("XML CONTENT IS")
+    #print(xml)
     add_comment(doc.doctype, doc.name, str(xml), doc.modified_by)
     soup = BeautifulSoup(xml, 'xml')
     error = soup.find_all('Fault')
@@ -101,16 +124,23 @@ def send_eirsaliye(delivery_note_name):
     if error:
         faultcode = soup.find('faultcode').getText()
         faultstring = soup.find('faultstring').getText()
-        frappe.msgprint(str(faultcode) + " " + str(faultstring))
-        return str(faultcode) + " " + str(faultstring)
+        #frappe.msgprint(str(faultcode) + " " + str(faultstring))
+        
+        #strResult = str(faultcode) + " " + str(faultstring)
+        dctResult = {'result': False, 'description': _("Error Code:{0}. Error Description:{1}").format(faultcode, faultstring)}
+    
     if belgeOid:
         msg = soup.find('belgeOid').getText()
         doc.yerelbelgeoid = msg
         doc.db_update()
         frappe.db.commit()
         doc.reload()
-        frappe.msgprint(str(msg))
-        return str(msg)
+        #frappe.msgprint(str(msg))
+
+        #strResult = str(msg)
+        dctResult = {'result': True, 'description': msg}
+
+    return dctResult#strResult
 
 
 def set_missing_address_values(address_doc):
@@ -178,17 +208,22 @@ def validate_address(doc):
 
 
 def validate_customer(doc):
-    field_list = ["tax_id", "tax_office"]
+    field_list = ["tax_id", "ld_tax_office"]
     for field in field_list:
         if not doc.get(field):
             frappe.throw(_("Field: '{0}' can not be emtpy in DocType: {1} {2}").format(field, doc.doctype, doc.name))
+    if doc.customer_type == "Company" and len(doc.tax_id) != 10:
+        frappe.throw(_("Tax ID field must have 10 numeric characters for Companys: {0}").format(doc.customer_name))
+    elif doc.customer_type == "Individual" and len(doc.tax_id) != 11:
+        frappe.throw(_("Tax ID field must have 11 numeric characters for Individuals: {0}").format(doc.customer_name))
 
 
 @frappe.whitelist()
 def validate_eirsaliye(delivery_note_name):
     doc = frappe.get_doc("Delivery Note", delivery_note_name)
     if not doc.yerelbelgeoid and not doc.belgeno:
-        frappe.throw(_("Please send the delivery note first"))
+        frappe.throw(_("Please send the delivery note first!"))
+    
     eirsaliye_settings = frappe.get_all("E Irsaliye Ayarlar", filters = {"company": doc.company})[0]
     settings_doc = frappe.get_doc("E Irsaliye Ayarlar", eirsaliye_settings)
     endpoint = settings_doc.test_eirsaliye_url if settings_doc.test_modu else settings_doc.eirsaliye_url
@@ -260,8 +295,14 @@ def validate_eirsaliye(delivery_note_name):
         doc.yerelbelgeoid = msg.get("yerelBelgeOid")
     doc.db_update()
     frappe.db.commit()
-    add_comment(doc.doctype, doc.name, str(xml), doc.modified_by)
-    return(msg)
+    
+    add_comment(doc.doctype, doc.name, _("Durum Kontrol Cevabı: {0}".format(msg)), doc.modified_by)
+    print(_("Durum Kontrol Cevabı: {0}".format(xml)))
+    
+    return {#return(msg)
+        'result': True,
+        'description': msg
+    }
 
 
 @frappe.whitelist()

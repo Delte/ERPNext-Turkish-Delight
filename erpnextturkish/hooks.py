@@ -31,10 +31,11 @@ app_include_js = "/assets/js/to_console.min.js"
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
 doctype_js = {
-    "Purchase Order": "public/js/purchase_order.js",
-    "Sales Invoice": "public/js/sales_invoice.js",
+	"Purchase Order": "public/js/purchase_order.js",
+	"Sales Invoice": "public/js/sales_invoice.js",
 	"Customer": "public/js/customer.js",
-	"Delivery Note": "eirsaliye/api/delivery_note.js"
+	"Delivery Note": "eirsaliye/api/delivery_note.js",
+	"Sales Order": "public/js/sales_order.js"
 }
 # Home Pages
 # ----------
@@ -85,9 +86,9 @@ doctype_js = {
 # Hook on document methods and events
 
 doc_events = {
- 	# "E Irsaliye Ayarlar": {
- 	# 	"onload": "erpnextturkish.eirsaliye.api.eirsaliye.send_eirsaliye",
-	# }
+ 	"Delivery Note": {
+ 		"on_submit": "erpnextturkish.eirsaliye.api.eirsaliye.on_submit_validate",
+	}
 }
 
 # Scheduled Tasks
@@ -135,7 +136,7 @@ fixtures = [
 		"Delivery Note-e_irsaliye_section",
 		"Delivery Note-eirsaliye_uuid",
 		"Delivery Note-belgeno",
-		"Customer-tax_office",
+		"Customer-ld_tax_office",
 		"Delivery Note-yenidengonderilebilirmi",
 		"Delivery Note-gonderimcevabidetayi",
 		"Delivery Note-gonderimcevabikodu",
@@ -143,6 +144,7 @@ fixtures = [
 		"Delivery Note-yerelbelgeoid",
 		"Delivery Note-durum",
 		"Delivery Note-column_break_20",
+		"Delivery Note-ld_note"
 	)]]},
 	{"doctype":"Property Setter", "filters": [["name", "in", (
 	
